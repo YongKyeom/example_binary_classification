@@ -12,11 +12,14 @@ from sklearn.model_selection import train_test_split
 
 from model.feature_select import fnFeatSelect_RandVar
 from model.optimize_hyperparameter import fnOpt_HyperPara
-from sklearn.metrics import confusion_matrix
+from utils.visualize import fnPrecision_Recall_Curve_Plot
+
 from sklearn.metrics import accuracy_score
 from sklearn.metrics import precision_score
 from sklearn.metrics import recall_score
 from sklearn.metrics import f1_score
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import classification_report
 
 from hyperopt import fmin, hp, STATUS_OK, Trials, tpe
 
@@ -172,8 +175,18 @@ finalModel.fit(
     verbose = False
 )
 
+## Cut-off 지점
+## Precission, Recall 사이에서의 최적지점 
+OPT_CUT_OFF = fnPrecision_Recall_Curve_Plot(
+    y_test = testScale_DF[TargetNM],
+    pred_proba = finalModel.predict_proba(testScale_DF[feat_Final_LS])[:,1],
+    plot_flag = False
+)
+
 ## Predict
-finalPredict = finalModel.predict(testScale_DF[feat_Final_LS])
+finalPredict_Prob = finalModel.predict_proba(testScale_DF[feat_Final_LS])
+finalPredict = [1 if x > OPT_CUT_OFF else 0 for x in finalPredict_Prob[:, 1]]
+
 
 ## Score
 SCORE_ACC = accuracy_score(
@@ -192,16 +205,33 @@ SCORE_F1 = f1_score(
     testScale_DF[TargetNM],
     finalPredict
 )
+print(f'Accuracy: {SCORE_ACC}')
+print(f'Precission: {SCORE_PRECISION}')
+print(f'Recall: {SCORE_RECALL}')
+print(f'F1 Score: {SCORE_F1}')
+
+scoreDF = pd.DataFrame(
+    {
+        'ACCURACY': SCORE_ACC,
+        'PRECISSION': SCORE_PRECISION,
+        'RECALL': SCORE_RECALL,
+        'F1_SCORE': SCORE_F1
+    },
+    index = [0]
+)
 confusionMatrix = confusion_matrix(
     testScale_DF[TargetNM],
     finalPredict
 )
 
-print(f'Accuracy: {SCORE_ACC}')
-print(f'Precission: {SCORE_PRECISION}')
-print(f'Recall: {SCORE_RECALL}')
-print(f'F1 Score: {SCORE_F1}')
-print(confusionMatrix)
+print('Score List')
+print(scoreDF, '\n')
+print('Confusion Matrix')
+print(confusionMatrix, '\n')
+print(classification_report(
+    testScale_DF[TargetNM],
+    finalPredict
+))
 
 sns.heatmap(confusionMatrix, annot=True, cmap='Blues')
 plt.show()
