@@ -5,11 +5,18 @@ import datetime
 from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
+from lightgbm import early_stopping
 
 from sklearn.model_selection import KFold
 from sklearn.metrics import log_loss
 
 from hyperopt import fmin, hp, STATUS_OK, Trials, tpe
+
+import warnings
+
+warnings.simplefilter(action="ignore", category=FutureWarning)
+warnings.simplefilter(action="ignore", category=RuntimeWarning)
+warnings.filterwarnings("ignore")
 
 
 def fnOpt_HyperPara(
@@ -115,7 +122,6 @@ def fnOpt_HyperPara(
                     model.fit(train_df[x_var],
                               train_df[y_var],
                               early_stopping_rounds = 15,
-                              eval_metric = 'rmse',
                               eval_set = [(train_df[x_var], train_df[y_var]),
                                           (valid_df[x_var], valid_df[y_var])],
                               verbose = False)
@@ -157,11 +163,15 @@ def fnOpt_HyperPara(
 
                     model.fit(train_df[x_var],
                               train_df[y_var],
-                              early_stopping_rounds = 15,
-                              eval_metric = 'rmse',
                               eval_set = [(train_df[x_var], train_df[y_var]),
                                           (valid_df[x_var], valid_df[y_var])],
-                              verbose = False)
+                              callbacks = [
+                                    early_stopping(
+                                        stopping_rounds = 15,
+                                        verbose = False
+                                        )
+                                    ]
+                              )
 
                     ## Score
                     score = log_loss(
@@ -237,17 +247,28 @@ def fnOpt_HyperPara(
                         ## Define
                         if ml_model == 'xgb':
                             model = XGBClassifier(**best_para, n_jobs = core_cnt, random_state = seed)
+                            model.fit(
+                                train_df[x_var],
+                                train_df[y_var],
+                                early_stopping_rounds = 15,
+                                eval_set = [(train_df[x_var], train_df[y_var]),
+                                            (valid_df[x_var], valid_df[y_var])],
+                                verbose = False
+                            )
                         else:
                             model = LGBMClassifier(**best_para, n_jobs = core_cnt, random_state = seed)
-
-                        ## Fit
-                        model.fit(train_df[x_var],
-                                  train_df[y_var],
-                                  early_stopping_rounds = 15,
-                                  eval_metric = 'rmse',
-                                  eval_set = [(train_df[x_var], train_df[y_var]),
-                                              (valid_df[x_var], valid_df[y_var])],
-                                  verbose = False)
+                            model.fit(
+                                train_df[x_var],
+                                train_df[y_var],
+                                eval_set = [(train_df[x_var], train_df[y_var]),
+                                            (valid_df[x_var], valid_df[y_var])],
+                                callbacks = [
+                                early_stopping(
+                                    stopping_rounds = 15,
+                                    verbose = False
+                                    )
+                                ]
+                            )
 
                         ## Number of Estimator
                         if ml_model == 'xgb':
@@ -256,16 +277,10 @@ def fnOpt_HyperPara(
                             nestimator_ls.append(model.best_iteration_)
 
                         ## Score
-                        if ml_model == 'xgb':
-                            score = log_loss(
-                                valid_df[y_var], 
-                                model.predict_proba(valid_df[x_var])
-                            )
-                        else:
-                            score = log_loss(
-                                valid_df[y_var], 
-                                model.predict_proba(valid_df[x_var])
-                            )
+                        score = log_loss(
+                            valid_df[y_var], 
+                            model.predict_proba(valid_df[x_var])
+                        )
                         score_ls.append(score)
 
                 ## L1&L2 regularization's Result
@@ -284,7 +299,14 @@ def fnOpt_HyperPara(
 
                 if len(reg_result) > 0:
                     ## Sort & Initialize index
-                    reg_result_agg = reg_result.groupby('reg_panalty').mean().reset_index().sort_values(['score', 'reg_panalty'], ascending = [True, True]).reset_index()
+                    reg_result_agg = (
+                        reg_result\
+                            .groupby('reg_panalty')\
+                            .mean()\
+                            .reset_index()\
+                            .sort_values(['score', 'reg_panalty'], ascending = [True, True])\
+                            .reset_index()
+                    )
 
                     ## Final Learning rate & n_estimator
                     best_reg = reg_result_agg.iloc[0]['reg_panalty']
@@ -333,17 +355,31 @@ def fnOpt_HyperPara(
                     ## Define
                     if ml_model == 'xgb':
                         model = XGBClassifier(**best_para, n_jobs = core_cnt, random_state = seed)
+                        ## Fit
+                        model.fit(
+                            train_df[x_var],
+                            train_df[y_var],
+                            early_stopping_rounds = 50,
+                            eval_set = [(train_df[x_var], train_df[y_var]),
+                                        (valid_df[x_var], valid_df[y_var])],
+                            verbose = False
+                        )
                     else:
                         model = LGBMClassifier(**best_para, n_jobs = core_cnt, random_state = seed)
+                        model.fit(
+                                train_df[x_var],
+                                train_df[y_var],
+                                eval_set = [(train_df[x_var], train_df[y_var]),
+                                            (valid_df[x_var], valid_df[y_var])],
+                                callbacks = [
+                                early_stopping(
+                                    stopping_rounds = 50,
+                                    verbose = False
+                                    )
+                                ]
+                            )
 
-                    ## Fit
-                    model.fit(train_df[x_var],
-                              train_df[y_var],
-                              early_stopping_rounds = 50,
-                              eval_metric = 'rmse',
-                              eval_set = [(train_df[x_var], train_df[y_var]),
-                                          (valid_df[x_var], valid_df[y_var])],
-                              verbose = False)
+                    
 
                     ## Number of Estimator
                     if ml_model == 'xgb':
@@ -411,7 +447,7 @@ def fnOpt_HyperPara(
             ## Fit
             model.fit(total_data[x_var], total_data[y_var])
             ## Score
-            score = log_loss(total_data[y_var], model.oob_prediction_)
+            score = model.oob_score_
             score_ls.append(score)
 
             stop_cnt = 0
@@ -427,7 +463,7 @@ def fnOpt_HyperPara(
                 ## Fit
                 model.fit(total_data[x_var], total_data[y_var])
                 ## Score
-                score = log_loss(total_data[y_var], model.oob_prediction_)
+                score = model.oob_score_
                 score_ls.append(score)
 
                 ## Early stopping

@@ -6,6 +6,7 @@ import datetime
 from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
+from lightgbm import early_stopping
 
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
@@ -140,20 +141,35 @@ feat_Final_LS = feat_RandSelct_LS
 ####################################################################################
 #### Hyper-parameter 최적화
 
-MODEL_NM = 'xgb'
+MODEL_NM = 'lgbm'
 H_PARA_SPACE = {
-    'max_depth': hp.uniform("max_depth", 1, 30),
-    'min_child_weight': hp.loguniform('min_child_weight', -3, 3),
-    'subsample': hp.uniform('subsample', 0.5, 1),
-    'colsample_bytree': hp.uniform('colsample_bytree', 0.5, 1),
-    'gamma': hp.loguniform('gamma', -10, 10)
+    'rf': {
+        'max_depth': hp.uniform("max_depth", 1, 30),
+        'min_samples_leaf': hp.uniform("min_samples_leaf", 2, 15),
+        'min_samples_split': hp.uniform("min_samples_split", 2, 15),
+        'max_features': hp.uniform("max_features", 2, len(feat_Final_LS))
+    },
+    'xgb': {
+        'max_depth': hp.uniform("max_depth", 1, 30),
+        'min_child_weight': hp.loguniform('min_child_weight', -3, 3),
+        'subsample': hp.uniform('subsample', 0.5, 1),
+        'colsample_bytree': hp.uniform('colsample_bytree', 0.5, 1),
+        'gamma': hp.loguniform('gamma', -10, 10)
+    },
+    'lgbm': {
+        'max_depth': hp.uniform("max_depth", 1, 30),
+        'min_child_weight': hp.loguniform('min_child_weight', -3, 3),
+        'subsample': hp.uniform('subsample', 0.5, 1),
+        'colsample_bytree': hp.uniform('colsample_bytree', 0.5, 1),
+        'num_leaves': hp.uniform('num_leaves', 5, 30)
+    }
 }
 
 TrialResult, BestPara = fnOpt_HyperPara(
     total_data = trainScale_DF, 
     x_var = feat_Final_LS, 
     y_var = TargetNM, 
-    space = H_PARA_SPACE, 
+    space = H_PARA_SPACE[MODEL_NM], 
     lean_rate_ls = [0.001, 0.01, 0.1], 
     ml_model = MODEL_NM, 
     core_cnt = -1, 
@@ -166,22 +182,45 @@ TrialResult, BestPara = fnOpt_HyperPara(
 
 ####################################################################################
 #### 최종 모델학습 및 예측
-finalModel = XGBClassifier(**BestPara)
-finalModel.fit(
-    trainScale_DF[feat_Final_LS], 
-    trainScale_DF[TargetNM],
-    early_stopping_rounds = 50,
-    eval_set = [(trainScale_DF[feat_Final_LS], trainScale_DF[TargetNM])],
-    verbose = False
-)
+
+if MODEL_NM == 'rf':
+    finalModel = RandomForestClassifier(**BestPara)
+    finalModel.fit(
+        trainScale_DF[feat_Final_LS], 
+        trainScale_DF[TargetNM]
+    )
+elif MODEL_NM == 'xgb':
+    finalModel = XGBClassifier(**BestPara)
+    finalModel.fit(
+        X = trainScale_DF[feat_Final_LS], 
+        y = trainScale_DF[TargetNM],
+        early_stopping_rounds = 50,
+        eval_set = [(trainScale_DF[feat_Final_LS], trainScale_DF[TargetNM])],
+        verbose = False
+    )
+else:
+    finalModel = LGBMClassifier(**BestPara)
+    finalModel.fit(
+        X = trainScale_DF[feat_Final_LS], 
+        y = trainScale_DF[TargetNM],
+        eval_set = [(trainScale_DF[feat_Final_LS], trainScale_DF[TargetNM])],
+        callbacks = [
+            early_stopping(
+                stopping_rounds = 30,
+                verbose = False
+                )
+            ]
+    )
+
 
 ## Cut-off 지점
-## Precission, Recall 사이에서의 최적지점 
+## Precission, Recall 사이에서의 최적지점
 OPT_CUT_OFF = fnPrecision_Recall_Curve_Plot(
     y_test = testScale_DF[TargetNM],
-    pred_proba = finalModel.predict_proba(testScale_DF[feat_Final_LS])[:,1],
-    plot_flag = False
+    pred_proba = finalModel.predict_proba(testScale_DF[feat_Final_LS])[:, 1],
+    plot_flag = True
 )
+
 
 ## Predict
 finalPredict_Prob = finalModel.predict_proba(testScale_DF[feat_Final_LS])
